@@ -1,0 +1,21 @@
+S. No.,Metro Area,Main City,Big Population,Top Pure sciences - Liberal arts,Local Industry,Med,Tier-2 Tech - IIIT,Tier-1 MBA,IIM,IIT,Tier-1 NIT,Travel & Tourism,Int. Air,Int. Industry,Score(12),Economy,Health - Local Edu,Int. Education,Global,Total Index
+1,Kharagpur - Kolkota - Shantineketan,Kolkata,1,1,1,1,1,1,1,1,1,1,1,0,11,300,300,600,600,1800
+2,Mumbai - Pune,Mumbai,1,1,1,1,1,1,0,1,1,1,1,1,11,300,300,400,900,1900
+3,Kanpur - Lucknow - Allahabad - Varanasi,Lucknow,1,1,1,1,1,1,1,1,1,0,1,0,10,300,300,600,300,1500
+4,Chennai - Vellore -Tiruchi - Tirupati,Chennai,1,1,1,1,1,1,1,1,1,1,1,1,12,300,300,600,900,2100
+5,Delhi Metro (NCR),Delhi,1,1,1,1,1,1,1,1,1,1,1,1,12,300,300,600,900,2100
+6,Guwahati - Shilong,Guwahati,0,1,0,0,1,1,1,1,1,0,1,0,7,100,200,600,300,1200
+7,Amritsar - Ropar,Amritsar,0,0,0,0,0,0,1,1,1,0,1,0,4,0,0,600,300,900
+8,Bhubaneswar -Sambalpur,Bhubaneswar,0,0,0,0,0,1,1,1,1,0,1,0,5,0,100,600,300,1000
+9,Ahmedabad - Gandhinagar,Ahmedabad,1,1,1,0,1,1,1,1,1,1,1,1,11,300,200,600,900,2000
+10,Hyderabad - Visakhapatnam,Hyderabad,1,1,1,1,0,0,1,1,0,1,1,1,9,300,100,400,900,1700
+11,Udaipur - Jodhpur - Jaipur,Jaipur,0,0,0,0,1,1,1,1,1,1,1,0,7,0,200,600,600,1400
+12,Patna - Bodh - Gaya,Patna,1,1,0,0,1,0,1,1,1,0,0,0,6,200,100,600,0,900
+13,Bhopal - Indore,Bhopal,1,0,1,0,1,1,1,1,0,0,0,1,7,200,200,400,300,1100
+14,Mandi - Shimla - Sirmaur,Shimla,0,1,0,0,1,0,1,1,1,1,0,0,6,100,100,600,300,1100
+15,Kozhikode - Palakkad - Kochi - Calicut,Kochi,0,1,1,1,1,1,1,1,0,1,1,0,9,200,300,400,600,1500
+16,Ranchi - Dhanbad - Bhilai,Dhanbad,1,1,1,0,1,1,1,1,1,0,0,0,8,300,200,600,0,1100
+17,Nagpur - Raipur - Bilaspur - Wardha,Nagpur,0,1,0,0,1,1,1,0,1,0,1,1,7,100,200,400,600,1300
+18,Srinagar - Jammu,Jammu,0,1,0,0,0,0,1,1,0,0,0,0,3,100,0,400,0,500
+19,Bangalore - Manipal,Bangalore,1,1,1,1,0,1,1,0,1,1,1,1,10,300,200,400,900,1800
+20,Roorkee - Kashipur - Dehradun,Roorkee,0,1,1,0,0,1,1,1,0,1,0,0,6,200,100,400,300,1000
