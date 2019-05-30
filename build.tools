@@ -1,0 +1,1080 @@
+#!/bin/bash
+
+#################### Script Header #########################
+#Script Name    : build.tools
+#Description    : usage: build.tools "x86_64 | i686 | arm | mips"
+#                                    "single |  multilib | multi"
+#                 i.e.:
+#                     build.tools x86_64 single
+#Author         : Anil Sharma (CBIR 2013 - 2015)
+#Email          : cbir.anil@gmail.com
+#################### End #################################
+# Always build x86_64 toolchain before any other toolchain
+
+set -e
+set -o pipefail
+
+MINPARAMS=1
+if [ $# -lt "$MINPARAMS" ]
+then
+    echo usage:
+    echo   build.tools  "x86_64 | i686 | arm | mips" "single |  multilib | multi"
+    echo
+    echo i.e.:
+    echo   build.tools x86_64 single
+    echo
+    exit 1
+fi
+
+BUILDTYPE=$1
+HOST=""
+BUILD=""
+TARGET=""
+LIBC=""
+ARCH=""
+GCC_ARCH=""
+CPU=""
+ENDIANESS=""
+A_MODE=""
+FLOAT=""
+FPU=""
+ABI=""
+USENEWTOOL=1
+MULTI="single"
+if [ "$2" ] 
+then
+    MULTI=$2
+fi
+GCC_VERSION="6.3.0"
+
+case "$MULTI" in
+    multi)
+        BINUTIL_MULTILIB="--enable-multilib"
+        BINUTIL_MULTIARCH="--enable-multiarch"
+        GCC_MULTILIB="--enable-multilib"
+        GCC_MULTIARCH="--enable-multiarch"
+        LIBC_MULTILIB="--enable-multilib"
+        LIBC_MULTIARCH="--enable-multi-arch"
+        ;;
+    multilib)
+        BINUTIL_MULTILIB="--enable-multilib"
+        BINUTIL_MULTIARCH="--disable-multiarch"
+        GCC_MULTILIB="--enable-multilib"
+        GCC_MULTIARCH="--disable-multiarch"
+        LIBC_MULTILIB="--enable-multilib"
+        LIBC_MULTIARCH="--disable-multi-arch"
+        ;;
+    single)
+        BINUTIL_MULTILIB="--disable-multilib"
+        BINUTIL_MULTIARCH="--disable-multiarch"
+        GCC_MULTILIB="--disable-multilib"
+        GCC_MULTIARCH="--disable-multiarch"
+        LIBC_MULTILIB="--disable-multilib"
+        LIBC_MULTIARCH="--disable-multi-arch"
+        ;;
+    *)
+        echo "Choices are: multi, single"
+        exit 1
+        ;;
+esac
+
+case "$BUILDTYPE" in
+    mips)
+        echo "MIPS Tools Build"
+        INSTDIR="mips"
+        TARGET="mips-unknown-linux-gnu"
+        HOST="x86_64-unknown-linux-gnu"
+        BUILD="x86_64-unknown-linux-gnu"
+        ARCH="mips"
+        GCC_ARCH=""
+        ENDIANESS=""
+        A_MODE=""
+        FLOAT=""
+        FPU=""
+        CPU=""
+        ABI=""
+        LIBC="uclibc"
+        ;;
+    arm)
+        echo "arm Tools Build"
+        INSTDIR="arm"
+        TARGET="arm-android-eabi"
+        HOST="x86_64-unknown-linux-gnu"
+        BUILD="x86_64-unknown-linux-gnu"
+        ARCH="armv7-a"
+        GCC_ARCH=""
+        ENDIANESS=""
+        A_MODE=""
+        FLOAT="soft"
+        FPU="neon"
+        CPU="7-a"
+        ABI="aapcs"
+        LIBC="glibc"
+        ;;
+    i686)
+        echo "i686 Tools Build"
+        INSTDIR="i686"
+        TARGET="i686-unknown-linux-gnu"
+        HOST="x86_64-unknown-linux-gnu"
+        BUILD="x86_64-unknown-linux-gnu"
+        ARCH="i686"
+        GCC_ARCH="i686"
+        ENDIANESS=""
+        A_MODE=""
+        FLOAT=""
+        CPU="i686"
+        FPU=""
+        ABI=""
+        LIBC="glibc"
+        ;;
+    x86_64)
+        echo "x86_64 Tools Build"
+        INSTDIR="x86_64"
+        TARGET="x86_64-unknown-linux-gnu"
+        HOST="x86_64-pc-linux-gnu"
+        BUILD="x86_64-pc-linux-gnu"
+        ARCH="x86_64"
+        GCC_ARCH="x86-64"
+        ENDIANESS=""
+        A_MODE=""
+        FLOAT=""
+        CPU="x86-64"
+        FPU=""
+        ABI=""
+        LIBC="glibc"
+        ;;
+    *)
+        echo "Choices are: i686, x86_64, arm, mips"
+        exit 1
+        ;;
+esac
+
+TOP=`pwd`
+echo Source Base=$TOP
+
+ulimit -c unlimited
+
+echo "----------Starting Tools Build-------------"
+
+export PREFIX=$TOP/$INSTDIR
+export HOST=$HOST
+export TARGET=$TARGET
+export BUILD=$BUILD
+
+source $TOP/packages_definitions
+
+echo "----------Testing Build Tool Versions----------"
+
+$TOP/Config/buildpackageversion
+
+echo "----------Printing Environment Variables-------"
+
+$TOP/Config/envtest
+
+function clean_dir {
+echo "Clean directories"
+
+rm -rf $TOP/buildoutput/$INSTDIR
+mkdir -p $TOP/buildoutput/$INSTDIR
+rm -rf $TOP/$INSTDIR
+mkdir -p $TOP/$INSTDIR
+mkdir -p $TOP/$INSTDIR/etc
+cp $TOP/boot/etc/ld.so.conf $TOP/$INSTDIR/etc/ld.so.conf
+mkdir -p $TOP/$INSTDIR/etc/ld.so.conf.d/
+
+}
+
+for pack in $pc_nos_linux_packages; do
+    echo "Cleaning $pack"
+    case "$pack" in
+    linux-headers)
+        echo "Skip linux-headers"
+        ;;
+
+    glibc)
+        cd $TOP/packages/$pack
+        if [ -f config.h ]
+        then
+            make distclean
+        fi
+        ;;
+
+    perl)
+        cd $TOP/packages/$pack
+        if [ -f config.h ]
+        then
+            make clean
+        fi
+        ;;
+
+    *)
+        cd $TOP/packages/$pack
+        if [ -f Makefile ]
+        then
+            make distclean
+        fi
+        ;;
+    esac
+    cd $TOP
+done
+
+function install_locale {
+
+echo "Installing Locale"
+LOCALEDEF=$PREFIX/usr/bin/localedef
+LOCALES=$TOP/packages/$LIBC/localedata/locales
+CHARMAPS=$TOP/packages/$LIBC/localedata/charmaps
+$LOCALEDEF -i $LOCALES/cs_CZ -f $CHARMAPS/UTF-8 --prefix= --add-to-archive 
+$LOCALEDEF -i $LOCALES/de_DE -f $CHARMAPS/ISO-8859-1 --prefix= --add-to-archive 
+$LOCALEDEF -i $LOCALES/de_DE@euro -f $CHARMAPS/ISO-8859-15 --prefix= --add-to-archive 
+$LOCALEDEF -i $LOCALES/de_DE -f $CHARMAPS/UTF-8 --prefix= --add-to-archive 
+$LOCALEDEF -i $LOCALES/en_GB -f $CHARMAPS/UTF-8 --prefix= --add-to-archive 
+$LOCALEDEF -i $LOCALES/en_HK -f $CHARMAPS/ISO-8859-1 --prefix= --add-to-archive 
+$LOCALEDEF -i $LOCALES/en_PH -f $CHARMAPS/ISO-8859-1 --prefix= --add-to-archive 
+$LOCALEDEF -i $LOCALES/en_US -f $CHARMAPS/ISO-8859-1 --prefix= --add-to-archive 
+$LOCALEDEF -i $LOCALES/en_US -f $CHARMAPS/UTF-8 $PREFIX/usr/lib/locale/en_US.UTF-8 --prefix= --add-to-archive
+$LOCALEDEF -i $LOCALES/es_MX -f $CHARMAPS/ISO-8859-1 --prefix= --add-to-archive 
+$LOCALEDEF -i $LOCALES/fa_IR -f $CHARMAPS/UTF-8 --prefix= --add-to-archive 
+$LOCALEDEF -i $LOCALES/fr_FR -f $CHARMAPS/ISO-8859-1 --prefix= --add-to-archive 
+$LOCALEDEF -i $LOCALES/fr_FR@euro -f $CHARMAPS/ISO-8859-15 --prefix= --add-to-archive 
+$LOCALEDEF -i $LOCALES/fr_FR -f $CHARMAPS/UTF-8 --prefix= --add-to-archive 
+$LOCALEDEF -i $LOCALES/it_IT -f $CHARMAPS/ISO-8859-1 --prefix= --add-to-archive 
+$LOCALEDEF -i $LOCALES/it_IT -f $CHARMAPS/UTF-8 --prefix= --add-to-archive 
+$LOCALEDEF -i $LOCALES/ja_JP -f $CHARMAPS/EUC-JP --prefix= --add-to-archive 
+$LOCALEDEF -i $LOCALES/ru_RU -f $CHARMAPS/KOI8-R --prefix= --add-to-archive 
+$LOCALEDEF -i $LOCALES/ru_RU -f $CHARMAPS/UTF-8 --prefix= --add-to-archive 
+$LOCALEDEF -i $LOCALES/tr_TR -f $CHARMAPS/UTF-8 --prefix= --add-to-archive 
+$LOCALEDEF -i $LOCALES/zh_CN -f $CHARMAPS/GB18030 --prefix= --add-to-archive 
+}
+
+function install_timezone {
+cd $1
+tar -xvf $TOP/boot/tzdata2018c.tar.gz
+mkdir -pv $1/{posix,right}
+for tz in etcetera southamerica northamerica europe africa antarctica \
+    asia australasia backward pacificnew \
+    systemv; do
+    zic -L /dev/null -d $1 -y "sh yearistype.sh" ${tz}
+    zic -L /dev/null -d $1/posix -y "sh yearistype.sh" ${tz}
+    zic -L leapseconds -d $1/right -y "sh yearistype.sh" ${tz}
+done
+zic -d $1 -p Asia/Kolkata
+}
+
+function set_build_env_x86_64_new {
+export PATH=$TOP/x86_64/libexec/gcc/x86_64-unknown-linux-gnu/$GCC_VERSION:$TOP/x86_64/usr/sbin:$TOP/x86_64/usr/bin:$TOP/x86_64/sbin:$TOP/x86_64/bin:$TOP/x86_64/x86_64-unknown-linux-gnu/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games
+export PKG_CONFIG_PATH=$TOP/x86_64/lib/pkgconfig
+export LD_LIBRARY_PATH=$TOP/x86_64/lib
+export LIBRARY_PATH=$TOP/x86_64/lib:$TOP/x86_64/lib64:$TOP/x86_64/usr/lib:$TOP/x86_64/usr/lib64:$TOP/x86_64/libexec:$TOP/x86_64/libexec/gcc/x86_64-unknown-linux-gnu/$GCC_VERSION:$TOP/x86_64/x86_64-unknown-linux-gnu/lib:$TOP/x86_64/x86_64-unknown-linux-gnu/lib64:$TOP/x86_64/$HOST/x86_64-unknown-linux-gnu/lib:$TOP/x86_64/usr/$HOST/lib64:$TOP/x86_64/usr/$HOST/lib32
+export C_INCLUDE_PATH=$TOP/x86_64/usr/include:$TOP/x86_64/include:$TOP/x86_64/x86_64-unknown-linux-gnu/include:$TOP/x86_64/x86_64-unknown-linux-gnu/include/c++/$GCC_VERSION/$HOST
+export CXX_INCLUDE_PATH=$TOP/x86_64/usr/include:$TOP/x86_64/include:$TOP/x86_64/x86_64-unknown-linux-gnu/include:$TOP/x86_64/x86_64-unknown-linux-gnu/include/c++/$GCC_VERSION/$HOST
+export CFLAGS="-fPIC -I$TOP/x86_64/usr/include -I$TOP/x86_64/include -I$TOP/x86_64/x86_64-unknown-linux-gnu/include"
+export CXXFLAGS="-fPIC -I$TOP/x86_64/usr/include -I$TOP/x86_64/include -I$TOP/x86_64/x86_64-unknown-linux-gnu/include"
+export LDFLAGS="-L$TOP/x86_64/lib -L$TOP/x86_64/lib64 -L$TOP/x86_64/usr/lib -L$TOP/x86_64/libexec -L$TOP/x86_64/usr/lib64 -L$TOP/x86_64/x86_64-unknown-linux-gnu/lib -L$TOP/x86_64/$HOST/x86_64-unknown-linux-gnu/lib -L$TOP/x86_64/usr/$HOST/lib64 -L$TOP/x86_64/usr/$HOST/lib32 -B$TOP/x86_64/libexec/gcc/x86_64-unknown-linux-gnu/$GCC_VERSION" 
+export CC=x86_64-unknown-linux-gnu-gcc                
+export CXX=x86_64-unknown-linux-gnu-g++               
+export AR=x86_64-unknown-linux-gnu-ar                 
+export RANLIB=x86_64-unknown-linux-gnu-ranlib         
+}
+
+function set_build_env_x86_64 {
+export PATH=$TOP/x86_64/libexec/gcc/x86_64-unknown-linux-gnu/$GCC_VERSION:$TOP/x86_64/usr/sbin:$TOP/x86_64/usr/bin:$TOP/x86_64/sbin:$TOP/x86_64/bin:$TOP/x86_64/x86_64-unknown-linux-gnu/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games
+export PKG_CONFIG_PATH=$TOP/x86_64/lib/pkgconfig:$TOP/x86_64/lib64/pkgconfig
+export LD_LIBRARY_PATH=$TOP/x86_64/lib:$TOP/x86_64/lib64:$TOP/x86_64/usr/lib:$TOP/x86_64/usr/lib64:$TOP/x86_64/libexec:$TOP/x86_64/libexec/gcc/x86_64-unknown-linux-gnu/$GCC_VERSION:$TOP/x86_64/x86_64-unknown-linux-gnu/lib:$TOP/x86_64/x86_64-unknown-linux-gnu/lib64:$TOP/x86_64/$HOST/x86_64-unknown-linux-gnu/lib
+export LIBRARY_PATH=$TOP/x86_64/lib:$TOP/x86_64/lib64:$TOP/x86_64/usr/lib:$TOP/x86_64/usr/lib64:$TOP/x86_64/libexec:$TOP/x86_64/libexec/gcc/x86_64-unknown-linux-gnu/$GCC_VERSION:$TOP/x86_64/x86_64-unknown-linux-gnu/lib:$TOP/x86_64/x86_64-unknown-linux-gnu/lib64:$TOP/x86_64/$HOST/x86_64-unknown-linux-gnu/lib
+export C_INCLUDE_PATH=$TOP/x86_64/usr/include:$TOP/x86_64/include:$TOP/x86_64/x86_64-unknown-linux-gnu/include:$TOP/x86_64/x86_64-unknown-linux-gnu/include/c++/$GCC_VERSION/$HOST
+export CXX_INCLUDE_PATH=$TOP/x86_64/usr/include:$TOP/x86_64/include:$TOP/x86_64/x86_64-unknown-linux-gnu/include:$TOP/x86_64/x86_64-unknown-linux-gnu/include/c++/$GCC_VERSION/$HOST
+export CFLAGS="-fPIC -I$TOP/x86_64/usr/include -I$TOP/x86_64/include -I$TOP/x86_64/x86_64-unknown-linux-gnu/include"
+export CXXFLAGS="-fPIC -I$TOP/x86_64/usr/include -I$TOP/x86_64/include -I$TOP/x86_64/x86_64-unknown-linux-gnu/include"
+export LDFLAGS="-L$TOP/x86_64/lib -L$TOP/x86_64/lib64 -L$TOP/x86_64/usr/lib -L$TOP/x86_64/libexec -L$TOP/x86_64/usr/lib64 -L$TOP/x86_64/x86_64-unknown-linux-gnu/lib -L$TOP/x86_64/$HOST/x86_64-unknown-linux-gnu/lib -B$TOP/x86_64/libexec/gcc/x86_64-unknown-linux-gnu/$GCC_VERSION" 
+export CC=x86_64-unknown-linux-gnu-gcc                
+export CXX=x86_64-unknown-linux-gnu-g++               
+export AR=x86_64-unknown-linux-gnu-ar                 
+export RANLIB=x86_64-unknown-linux-gnu-ranlib         
+}
+
+function set_build_env_others {
+export PATH=$PREFIX/libexec/gcc/$TARGET/$GCC_VERSION:$PREFIX/usr/sbin:$PREFIX/usr/bin:$PREFIX/sbin:$PREFIX/bin:$PREFIX/$TARGET/bin
+export PKG_CONFIG_PATH=$PREFIX/lib/pkgconfig:$PREFIX/lib64/pkgconfig:/usr/lib/x86_64-linux-gnu
+export LD_LIBRARY_PATH=$PREFIX/lib:$PREFIX/lib64:$PREFIX/usr/lib:$PREFIX/usr/lib64:$PREFIX/libexec:$PREFIX/libexec/gcc/$TARGET/$GCC_VERSION:$PREFIX/$TARGET/lib:$PREFIX/$TARGET/lib64:$PREFIX/$HOST/$TARGET/lib
+export LIBRARY_PATH=$PREFIX/lib:$PREFIX/lib64:$PREFIX/usr/lib:$PREFIX/usr/lib64:$PREFIX/libexec:$PREFIX/libexec/gcc/$TARGET/$GCC_VERSION:$PREFIX/$TARGET/lib:$PREFIX/$TARGET/lib64:$PREFIX/$HOST/$TARGET/lib
+export C_INCLUDE_PATH=$PREFIX/usr/include:$PREFIX/include:$PREFIX/$TARGET/include:$PREFIX/$TARGET/include/c++/$GCC_VERSION/$HOST
+export CXX_INCLUDE_PATH=$PREFIX/usr/include:$PREFIX/include:$PREFIX/$TARGET/include:$PREFIX/$TARGET/include/c++/$GCC_VERSION/$HOST
+export CFLAGS="-fPIC -I$PREFIX/usr/include -I$PREFIX/include -I$PREFIX/$TARGET/include"
+export CXXFLAGS="-fPIC -I$PREFIX/usr/include -I$PREFIX/include -I$PREFIX/$TARGET/include"
+export LDFLAGS="-L$PREFIX/lib -L$PREFIX/lib64 -L$PREFIX/usr/lib -L$PREFIX/libexec -L$PREFIX/usr/lib64 -L$PREFIX/$TARGET/lib -L$PREFIX/$HOST/$TARGET/lib -B$PREFIX/libexec/gcc/$TARGET/$GCC_VERSION" 
+export CC=$TARGET-gcc                
+export CXX=$TARGET-g++               
+export AR=$TARGET-ar                 
+export RANLIB=$TARGET-ranlib         
+}
+
+function libtool_fixup {
+    sed -i -e "s@ /lib@ $PREFIX/lib@g" -e "s@'/lib@'$PREFIX/lib@g" $1
+}
+
+function build_pc_nos_linux_component {
+
+    echo "----------------------------------------------------------"
+    echo "-------------- building $1 ---------------------"
+    echo "-------- $(date)--------"
+    echo "----------------------------------------------------------"
+
+    DIR=$2
+    echo "Building tools: Pass: $USENEWTOOL"
+
+    case "$1" in
+    autoconf)
+    rm -rf $TOP/buildoutput/$DIR/autoconf
+    mkdir $TOP/buildoutput/$DIR/autoconf
+    cd $TOP/buildoutput/$DIR/autoconf
+    ../../../packages/autoconf/configure --prefix=/usr 
+    make
+    make DESTDIR=$PREFIX install
+    make distclean
+    ;;
+
+    bash)
+    rm -rf $TOP/buildoutput/$DIR/bash
+    mkdir $TOP/buildoutput/$DIR/bash
+    cd $TOP/buildoutput/$DIR/bash
+    ../../../packages/bash/configure --prefix= \
+        --enable-readline --disable-nls 
+    make
+    make DESTDIR=$PREFIX install
+    ln -s $PREFIX/bin/bash $PREFIX/bin/sh
+    make distclean
+    ;;
+
+    binutils)
+    rm -rf $TOP/buildoutput/$DIR/binutils
+    mkdir $TOP/buildoutput/$DIR/binutils
+    cd $TOP/buildoutput/$DIR/binutils
+    if [ $USENEWTOOL = 1 ]
+    then
+    ../../../packages/binutils/configure --prefix=$PREFIX \
+         --build=$BUILD --host=$HOST --target=$TARGET \
+         --with-sysroot=/ --disable-nls --disable-werror \
+         --with-lib-path=$PREFIX/usr/lib \
+         $BINUTIL_MULTILIB $BINUTIL_MULTIARCH 
+    make
+    make install
+    make distclean
+    fi
+    if [ $USENEWTOOL = 2 ]
+    then
+    cp $PREFIX/$TARGET/lib/crtn.o $PREFIX/lib/gcc/$TARGET/$GCC_VERSION/crtn.o 
+    cp $PREFIX/$TARGET/lib/crti.o $PREFIX/lib/gcc/$TARGET/$GCC_VERSION/crti.o
+    cp $PREFIX/$TARGET/lib/libc.so $PREFIX/lib/gcc/$TARGET/$GCC_VERSION/libc.so
+
+    echo "GCC path"
+    echo "$(/home/anil/CWRS/cwrs/x86_64/bin/x86_64-unknown-linux-gnu-gcc --print-search-dirs)"
+    echo "$(ls -al $PREFIX/lib/gcc/$TARGET/$GCC_VERSION)"
+    echo "LD path"
+    echo "$(/home/anil/CWRS/cwrs/x86_64/x86_64-unknown-linux-gnu/bin/ld -verbose | grep SEARCH)"
+
+    CC=$TARGET-gcc                \
+    CXX=$TARGET-g++               \
+    AR=$TARGET-ar                 \
+    RANLIB=$TARGET-ranlib         \
+    ../../../packages/binutils/configure --prefix=$PREFIX --build=$BUILD \
+        --host=$HOST --target=$TARGET --disable-nls --with-sysroot=/ \
+        --with-lib-path=$PREFIX/usr/lib --disable-werror \
+        LDFLAGS="-B $PREFIX/usr/lib -L$PREFIX/lib/gcc/$TARGET/$GCC_VERSION" \
+        $BINUTIL_MULTILIB $BINUTIL_MULTIARCH
+    make
+    rm $PREFIX/lib/gcc/$TARGET/$GCC_VERSION/crtn.o
+    rm $PREFIX/lib/gcc/$TARGET/$GCC_VERSION/crti.o
+    rm $PREFIX/lib/gcc/$TARGET/$GCC_VERSION/libc.so
+    make install
+    make -C ld clean
+    make -C ld LIB_PATH=$PREFIX/usr/lib:$PREFIX/lib:$PREFIX/usr/lib64:$PREFIX/lib64
+    cp -v ld/ld-new $PREFIX/bin
+    make distclean
+    fi
+    ;;
+   
+    bison)
+    rm -rf $TOP/buildoutput/$DIR/bison
+    mkdir $TOP/buildoutput/$DIR/bison
+    cd $TOP/buildoutput/$DIR/bison
+    ../../../packages/bison/configure --prefix=/usr \
+        --enable-silent-rules
+    make
+    make DESTDIR=$PREFIX install
+    make distclean
+    ;;
+
+    help2man)
+    rm -rf $TOP/buildoutput/$DIR/help2man
+    mkdir $TOP/buildoutput/$DIR/help2man
+    cd $TOP/buildoutput/$DIR/help2man
+    ../../../packages/help2man/configure --prefix= 
+    make
+    make DESTDIR=$PREFIX install
+    make distclean
+    ;;
+
+    bzip2)
+    cd $TOP/packages/bzip2
+    make PREFIX=$PREFIX install
+    make distclean
+    ;;
+
+    coreutils)
+    rm -rf $TOP/buildoutput/$DIR/coreutils
+    mkdir $TOP/buildoutput/$DIR/coreutils
+    cd $TOP/buildoutput/$DIR/coreutils
+    ../../../packages/coreutils/configure --prefix= \
+        --enable-threads=posix       
+    make
+    make DESTDIR=$PREFIX install
+    make distclean
+    ;;
+
+    diffutils)
+    rm -rf $TOP/buildoutput/$DIR/diffutils
+    mkdir $TOP/buildoutput/$DIR/diffutils
+    cd $TOP/buildoutput/$DIR/diffutils
+    ../../../packages/diffutils/configure --prefix= \
+        --enable-silent-rules
+    make
+    make DESTDIR=$PREFIX install
+    make distclean
+    ;;
+
+    file)
+    rm -rf $TOP/buildoutput/$DIR/file
+    mkdir $TOP/buildoutput/$DIR/file
+    cd $TOP/buildoutput/$DIR/file
+    ../../../packages/file/configure --prefix=
+    make
+    make DESTDIR=$PREFIX install
+    libtool_fixup $PREFIX/lib/libmagic.la
+    make distclean
+    ;;
+
+    findutils)
+    rm -rf $TOP/buildoutput/$DIR/findutils
+    mkdir $TOP/buildoutput/$DIR/findutils
+    cd $TOP/buildoutput/$DIR/findutils
+    ../../../packages/findutils/configure --prefix=
+    make
+    make DESTDIR=$PREFIX install
+    make distclean
+    ;;
+
+    flex)
+    rm -rf $TOP/buildoutput/$DIR/flex
+    mkdir $TOP/buildoutput/$DIR/flex
+    cd $TOP/buildoutput/$DIR/flex
+    ../../../packages/flex/configure --prefix=
+    make
+    make DESTDIR=$PREFIX install
+    make distclean
+    ;;
+
+    gawk)
+    rm -rf $TOP/buildoutput/$DIR/gawk
+    mkdir $TOP/buildoutput/$DIR/gawk
+    cd $TOP/buildoutput/$DIR/gawk
+    ../../../packages/gawk/configure --prefix=
+    make
+    make DESTDIR=$PREFIX install
+    make distclean
+    ;;
+
+    gcc)
+    if [ $USENEWTOOL = 1 ]
+    then
+    export PATH=$PREFIX/$TARGET/bin:$TOP/x86_64/bin:$PREFIX/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games
+
+    rm -rf $TOP/buildoutput/$DIR/gcc
+    mkdir $TOP/buildoutput/$DIR/gcc
+    cd $TOP/buildoutput/$DIR/gcc
+    ../../../packages/gcc/configure --prefix=$TOP/$INSTDIR --exec-prefix=$TOP/$INSTDIR \
+        --build=$BUILD --host=$HOST --target=$TARGET \
+        --with-sysroot= --disable-nls --disable-bootstrap --without-headers \
+        --disable-threads --enable-__cxa_atexit --disable-shared --with-newlib \
+        --enable-clocale=gnu --enable-languages=c,c++ --disable-libvtv \
+        --disable-libgomp --disable-libssp --disable-libstdc++-v3 \
+        --disable-libsanitizer --disable-libatomic --disable-libmpx \
+        --disable-libquadmath --disable-libmudflap --disable-decimal-float \
+        --with-build-libtarget=$PREFIX --disable-libitm \
+        --with-build-sysroot= $GCC_MULTILIB $GCC_MULTIARCH 
+    fi
+
+    if [ $USENEWTOOL = 2 ]
+    then
+    rm -rf $TOP/buildoutput/$DIR/gcc
+    mkdir $TOP/buildoutput/$DIR/gcc
+    cd $TOP/buildoutput/$DIR/gcc
+    cd $TOP/packages/gcc
+    cat gcc/limitx.h gcc/glimits.h gcc/limity.h > \
+           fixincludes/limits.h
+    cp $TOP/boot/etc/stubs-32.h $PREFIX/usr/include/gnu
+    cp -v gcc/Makefile.in{,.tmp}
+    sed 's/^T_CFLAGS =$/& -fomit-frame-pointer/' gcc/Makefile.in.tmp \
+      > gcc/Makefile.in
+    cp $PREFIX/$TARGET/lib/crtn.o $PREFIX/lib/gcc/$TARGET/$GCC_VERSION/crtn.o 
+    cp $PREFIX/$TARGET/lib/crti.o $PREFIX/lib/gcc/$TARGET/$GCC_VERSION/crti.o
+    cp $PREFIX/$TARGET/lib/crt1.o $PREFIX/lib/gcc/$TARGET/$GCC_VERSION/crt1.o
+    cp $PREFIX/$TARGET/lib/libc.so $PREFIX/lib/gcc/$TARGET/$GCC_VERSION/libc.so
+
+    export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/lib32
+
+    cd $TOP/buildoutput/$DIR/gcc
+    BUILD_CC=gcc                         \
+    CC=$TARGET-gcc                       \
+    CXX=$TARGET-g++                      \
+    AR=$TARGET-ar                        \
+    RANLIB=$TARGET-ranlib                \
+    ../../../packages/gcc/configure --prefix=$TOP/$INSTDIR --exec-prefix=$TOP/$INSTDIR \
+        --build=$BUILD --host=$HOST --target=$TARGET --with-sysroot=/ \
+        --enable-threads=posix --enable-__cxa_atexit --enable-shared \
+        --enable-clocale=gnu --enable-languages=c,c++ --enable-plugin \
+        --disable-nls --enable-c99 --enable-long-long --with-build-libtarget= \
+        --with-native-system-header-dir=$PREFIX/usr/include \
+        --with-headers= --disable-libitm --disable-libgomp \
+        $GCC_MULTILIB $GCC_MULTIARCH \
+        CPPFLAGS="-fPIC -I $PREFIX/usr/include" \
+        CXXFLAGS="-fPIC -isystem $PREFIX/$TARGET/include/c++/$GCC_VERSION/$BUILD" \
+        LDFLAGS="-B $PREFIX/usr/lib -B $PREFIX/usr/$BUILD/lib64 -L$PREFIX/usr/$BUILD/lib64"
+    fi
+
+    make
+    if [ $USENEWTOOL = 2 ]
+    then
+    rm $PREFIX/lib/gcc/$TARGET/$GCC_VERSION/crtn.o
+    rm $PREFIX/lib/gcc/$TARGET/$GCC_VERSION/crti.o
+    rm $PREFIX/lib/gcc/$TARGET/$GCC_VERSION/crt1.o
+    rm $PREFIX/lib/gcc/$TARGET/$GCC_VERSION/libc.so
+    fi
+    echo "GCC INSTALL"
+    make install
+    echo "GCC DISTCLEAN"
+    make clean
+
+    if [ $USENEWTOOL = 2 ]
+    then
+    if [ $BUILDTYPE = "x86_64" ]
+    then
+    set_build_env_x86_64_new
+    else
+    set_build_env_others
+    fi
+    fi
+    if [ $USENEWTOOL = 1 ]
+    then
+    let USENEWTOOL=$USENEWTOOL+1
+    fi
+    ;;
+
+    glibc)
+    if [ $LIBC = "glibc" ]
+    then
+    if [ $USENEWTOOL = 1 ]
+    then
+    rm -rf $TOP/buildoutput/$DIR/glibc
+    mkdir $TOP/buildoutput/$DIR/glibc
+    cd $TOP/buildoutput/$DIR/glibc
+    ../../../packages/glibc/configure --prefix=$PREFIX/usr --with-elf \
+        --build=$BUILD --host=$HOST --target=$TARGET \
+        --enable-hacker-mode --enable-shared \
+        --with-headers=$PREFIX/usr/include --disable-sanity-checks \
+        $LIBC_MULTILIB $LIBC_MULTIARCH 
+    make cross-compiling=yes install_root= install-headers install-bootstrap-headers=yes
+    make csu/subdir_lib
+    cp csu/crt1.o csu/crti.o csu/crtn.o $PREFIX/$TARGET/lib
+    mkdir -p $PREFIX/lib64
+    mkdir -p $PREFIX/usr/lib64
+    cp -r $TOP/boot/etc/libc.so $PREFIX/usr/lib64
+    sed -i -e "s@ /lib@ ../../lib@g" -e "s@ /usr@ ../../usr@g" $PREFIX/usr/lib64/libc.so
+    cp -r $TOP/boot/etc/$INSTDIR/* $PREFIX
+    make distclean
+    fi
+
+    if [ $USENEWTOOL = 2 ]
+    then
+    rm -rf $TOP/buildoutput/$DIR/glibc
+    mkdir $TOP/buildoutput/$DIR/glibc
+    cd $TOP/buildoutput/$DIR/glibc
+
+    if [ $MULTI = "multi" ] || [ $MULTI = "multilib" ]
+    then
+
+    echo "-------------------glibc $MULTI ----------------"
+
+    BUILD_CC=gcc                             \
+    CC="$TARGET-gcc -m32 -m64"               \
+    CXX="$TARGET-g++ -m32 -m64"              \
+    AR=$TARGET-ar                            \
+    RANLIB=$TARGET-ranlib                    \
+    ../../../packages/glibc/configure --prefix=$PREFIX/usr \
+        --enable-kernel=3.2 --disable-profile \
+        --build=$BUILD --host=$HOST --target=$TARGET \
+        --disable-debug --without-gd --with-elf --enable-shared \
+        --with-headers=$PREFIX/usr/include --enable-add-ons \
+        --libdir=$PREFIX/usr/lib32 --libexecdir=$PREFIX/usr/lib32 \
+        CFLAGS="-fPIC -O2 -D_GNU_SOURCE" \
+        libc_cv_ssp=no libc_cv_ssp_strong=no \
+        $LIBC_MULTILIB $LIBC_MULTIARCH 
+    make csu/subdir_lib
+    cp csu/crt1.o csu/crti.o csu/crtn.o $PREFIX/$TARGET/lib
+    cp -r $TOP/boot/etc/libc.so $PREFIX/$TARGET/lib
+    #cp -r $TOP/boot/etc/$INSTDIR/* $PREFIX
+
+    echo "-----------------build full glibc $MULTI --------"
+    make distclean
+    BUILD_CC=gcc                             \
+    CC="$TARGET-gcc -m32 -m64"               \
+    CXX="$TARGET-g++ -m32 -m64"              \
+    AR=$TARGET-ar                            \
+    RANLIB=$TARGET-ranlib                    \
+    ../../../packages/glibc/configure --prefix=$PREFIX/usr \
+        --enable-kernel=3.2 --disable-profile \
+        --build=$BUILD --host=$HOST --target=$TARGET \
+        --disable-debug --without-gd --with-elf --enable-shared \
+        --with-headers=$PREFIX/usr/include --enable-add-ons \
+        CFLAGS="-fPIC -O2 -D_GNU_SOURCE" \
+        --libdir=$PREFIX/usr/lib32 --libexecdir=$PREFIX/usr/lib32 \
+        libc_cv_ssp=no libc_cv_ssp_strong=no \
+        $LIBC_MULTILIB $LIBC_MULTIARCH 
+    make 
+    make install_root= install
+    make distclean
+
+    else
+
+    echo "-------------------glibc $MULTI ----------------"
+
+    CC=$TARGET-gcc                           \
+    CXX=$TARGET-g++                          \
+    AR=$TARGET-ar                            \
+    RANLIB=$TARGET-ranlib                    \
+    ../../../packages/glibc/configure --prefix=$PREFIX/usr \
+        --enable-kernel=3.2 --disable-profile \
+        --build=$BUILD --host=$HOST --target=$TARGET \
+        --disable-debug --without-gd --with-elf --enable-shared \
+        --with-headers=$PREFIX/usr/include --enable-add-ons \
+        CFLAGS="-fPIC -O2 -D_GNU_SOURCE" \
+        libc_cv_ssp=no libc_cv_ssp_strong=no \
+        $LIBC_MULTILIB $LIBC_MULTIARCH 
+    make csu/subdir_lib
+    cp csu/crt1.o csu/crti.o csu/crtn.o $PREFIX/$TARGET/lib
+    cp -r $TOP/boot/etc/libc.so $PREFIX/$TARGET/lib
+    #cp -r $TOP/boot/etc/$INSTDIR/* $PREFIX
+
+    echo "-----------------build full glibc $MULTI --------"
+
+    make distclean
+    CC=$TARGET-gcc                          \
+    CXX=$TARGET-g++                         \
+    AR=$TARGET-ar                            \
+    RANLIB=$TARGET-ranlib                    \
+    ../../../packages/glibc/configure --prefix=$PREFIX/usr \
+        --enable-kernel=3.2 --disable-profile \
+        --build=$BUILD --host=$HOST --target=$TARGET \
+        --disable-debug --without-gd --with-elf --enable-shared \
+        --with-headers=$PREFIX/usr/include --enable-add-ons \
+        CFLAGS="-fPIC -O2 -D_GNU_SOURCE" \
+        libc_cv_ssp=no libc_cv_ssp_strong=no \
+        $LIBC_MULTILIB $LIBC_MULTIARCH 
+    make 
+    make install_root= install
+    make distclean
+
+    fi
+
+    echo "-------------------glibc build complete ----------------"
+
+    mkdir -p $PREFIX/usr/lib64
+    cp $PREFIX/$TARGET/lib/libc.so $PREFIX/usr/lib64/libc.so
+    #cp $PREFIX/$TARGET/lib/libpthread.so $PREFIX/usr/lib64/libpthread.so
+    #cp $PREFIX/$TARGET/lib/libm.so $PREFIX/usr/lib64/libm.so
+    sed -i -e "s@ /lib64@ ../../lib64@g" -e "s@ /usr@ ../../usr@g" $PREFIX/usr/lib64/libc.so
+    #sed -i -e "s@ /lib64@ ../../lib64@g" -e "s@ /usr@ ../../usr@g" $PREFIX/usr/lib64/libpthread.so
+    #sed -i -e "s@ /lib64@ ../../lib64@g" -e "s@ /usr@ ../../usr@g" $PREFIX/usr/lib64/libm.so
+    cp $TOP/boot/etc/nsswitch.conf $PREFIX/etc
+    cp $TOP/boot/localtime $PREFIX/etc
+
+    echo "-----------------------install locale----------------"
+
+    if [ $MULTI = "multi" ] || [ $MULTI = "multilib" ]
+    then
+    mkdir -p $PREFIX/usr/lib32/locale
+    install_locale $PREFIX/usr/lib32/locale
+    mkdir -p $PREFIX/usr/share/zoneinfo
+    install_timezone $PREFIX/usr/share/zoneinfo
+    else
+    mkdir -p $PREFIX/usr/lib/locale
+    install_locale $PREFIX/usr/lib/locale
+    mkdir -p $PREFIX/usr/share/zoneinfo
+    install_timezone $PREFIX/usr/share/zoneinfo
+    fi
+    fi
+    
+    echo "-------------------------------------------------------"
+    echo "--------Building GCC libstdc++-v3: Pass: $USENEWTOOL---"
+    echo "-------------------------------------------------------"
+
+    rm -rf $TOP/buildoutput/$DIR/gcc
+    mkdir $TOP/buildoutput/$DIR/gcc
+    cd $TOP/buildoutput/$DIR/gcc
+    GXX_INC=$PREFIX/$TARGET/include/c++/$GCC_VERSION
+
+    CC=$TARGET-gcc                       \
+    CXX=$TARGET-g++                      \
+    AR=$TARGET-ar                        \
+    RANLIB=$TARGET-ranlib                \
+    ../../../packages/gcc/libstdc++-v3/configure --prefix=$PREFIX/usr \
+           --disable-nls --disable-libstdcxx-threads --disable-libstdcxx-pch \
+           --build=$BUILD --host=$HOST --target=$TARGET --disable-shared --with-newlib \
+           --with-cross-host=$HOST --with-gxx-include-dir=$GXX_INC \
+           LDFLAGS="-B $PREFIX/usr/lib" CPPFLAGS="-fPIC -I $PREFIX/usr/include" \
+           $LIBC_MULTILIB 
+    make
+    make install
+    make distclean
+    fi
+    ;;
+
+    uclibc)
+    if [ $LIBC = "uclibc" ]
+    then
+    if [ $USENEWTOOL = 1 ]
+    then
+    cd $TOP/packages/uclibc
+    make distclean
+    if [ $ARCH = "mips" ]
+    then
+        cp config_mips .config
+        echo "Copied $ARCH file"
+    elif [ $ARCH = "arm" ]
+    then
+        cp config_arm .config
+        echo "Copied $ARCH file"
+    elif [ $ARCH = "i686" ]
+    then
+        cp config_i686 .config
+        echo "Copied $ARCH file"
+    elif [ $ARCH = "x86_64" ]
+    then
+        cp config_x86_64 .config
+        echo "Copied $ARCH file"
+    fi
+    make TARGET_ARCH=$ARCH oldconfig
+    make TARGET_ARCH=$ARCH all
+    make DESTDIR=$PREFIX install
+    make distclean
+    fi
+    if [ $USENEWTOOL = 2 ]
+    then
+    export PATH=$PREFIX/usr/sbin:$PREFIX/usr/bin:$PREFIX/sbin:$PREFIX/bin:$PREFIX/$TARGET/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games
+    export LIBRARY_PATH=$PREFIX/lib:$PREFIX/lib64:$PREFIX/usr/lib:$PREFIX/usr/lib64:$PREFIX/libexec:$PREFIX/$TARGET/lib:$PREFIX/$TARGET/lib64
+    export LD_LIBRARY_PATH=$PREFIX/lib:$PREFIX/lib64:$PREFIX/usr/lib:$PREFIX/usr/lib64:$PREFIX/libexec:$PREFIX/$TARGET/lib:$PREFIX/$TARGET/lib64
+    export C_INCLUDE_PATH=$PREFIX/include:$PREFIX/usr/include:$PREFIX/$TARGET/include
+    export CXX_INCLUDE_PATH=$PREFIX/include:$PREFIX/usr/include:$PREFIX/$TARGET/include
+    cd $TOP/packages/uclibc
+    make distclean
+    if [ $ARCH = "mips" ]
+    then
+        cp config_mips .config
+        echo "Copied $ARCH file"
+    elif [ $ARCH = "arm" ]
+    then
+        cp config_arm .config
+        echo "Copied $ARCH file"
+    elif [ $ARCH = "i686" ]
+    then
+        cp config_i686 .config
+        echo "Copied $ARCH file"
+    elif [ $ARCH = "x86_64" ]
+    then
+        cp config_x86_64 .config
+        echo "Copied $ARCH file"
+    fi
+    export CC=$TARGET-gcc                       
+    export CXX=$TARGET-g++                      
+    export AR=$TARGET-ar                       
+    export RANLIB=$TARGET-ranlib                
+    make TARGET_ARCH=$ARCH oldconfig
+    make TARGET_ARCH=$ARCH all
+    make DESTDIR=$PREFIX install
+    make distclean
+    export CC=                       
+    export CXX=                   
+    export AR=                       
+    export RANLIB=                
+    fi
+    if [ $USENEWTOOL = 1 ]
+    then
+    let USENEWTOOL=$USENEWTOOL+1
+    fi
+    fi
+    ;;
+
+    gettext)
+    rm -rf $TOP/buildoutput/$DIR/gettext
+    mkdir $TOP/buildoutput/$DIR/gettext
+    cd $TOP/buildoutput/$DIR/gettext
+    ../../../packages/gettext/configure --prefix= --with-pic
+    make
+    make DESTDIR=$PREFIX install
+    libtool_fixup $PREFIX/lib/libgettextlib.la
+    libtool_fixup $PREFIX/lib/libgettextpo.la
+    libtool_fixup $PREFIX/lib/libgettextsrc.la
+    libtool_fixup $PREFIX/lib/libasprintf.la
+    make distclean
+    ;;
+
+    grep)
+    rm -rf $TOP/buildoutput/$DIR/grep
+    mkdir $TOP/buildoutput/$DIR/grep
+    cd $TOP/buildoutput/$DIR/grep
+    ../../../packages/grep/configure --prefix=
+    make
+    make DESTDIR=$PREFIX install
+    make distclean
+    ;;
+
+    gzip)
+    rm -rf $TOP/buildoutput/$DIR/gzip
+    mkdir $TOP/buildoutput/$DIR/gzip
+    cd $TOP/buildoutput/$DIR/gzip
+    ../../../packages/gzip/configure --prefix=
+    make
+    make DESTDIR=$PREFIX install
+    make distclean
+    ;;
+
+    linux-headers)
+
+    #ARCH Headers
+    echo "-------------------- Making $ARCH headers ------------"
+    rm -rf $TOP/linux-headers
+    mkdir $TOP/linux-headers
+    cd $TOP/linux
+    make clean
+    make mrproper
+    if [ $ARCH = "x86_64" ]
+    then
+        make ARCH=x86_64 headers_check
+        make ARCH=i386 headers_check
+        make ARCH=arm headers_check
+        make INSTALL_HDR_PATH=$TOP/linux-headers headers_install
+        #LINUX_ARCH="x86_64"
+        #make ARCH=$LINUX_ARCH headers_check
+        #make ARCH=$LINUX_ARCH INSTALL_HDR_PATH=$TOP/linux-headers headers_install
+    elif [ $ARCH = "i686" ]
+    then
+        LINUX_ARCH="i386"
+        CROSS_CC="i386-linux-gnu"
+        make ARCH=$LINUX_ARCH CROSS_COMPILE=$CROSS_CC headers_check
+        make ARCH=$LINUX_ARCH CROSS_COMPILE=$CROSS_CC \
+            INSTALL_HDR_PATH=$TOP/linux-headers headers_install
+    elif [ $ARCH = "armv7-a" ]
+    then
+        LINUX_ARCH="arm"
+        CROSS_CC="arm-linux-gnu-"
+
+        echo "------ checking headers ------"
+        make ARCH=$LINUX_ARCH CROSS_COMPILE=$CROSS_CC headers_check
+
+        echo "------ making arm headers ------"
+        make ARCH=$LINUX_ARCH CROSS_COMPILE=$CROSS_CC \
+            INSTALL_HDR_PATH=$TOP/linux-headers headers_install
+    elif [ $ARCH = "mips" ]
+    then
+        LINUX_ARCH="mips"
+        CROSS_CC="mips-linux-gnu"
+        make ARCH=$LINUX_ARCH CROSS_COMPILE=$CROSS_CC headers_check
+        make ARCH=$LINUX_ARCH CROSS_COMPILE=$CROSS_CC \
+            INSTALL_HDR_PATH=$TOP/linux-headers headers_install
+    fi
+    mkdir -p $PREFIX/usr/include
+    cp -rv $TOP/linux-headers/include/* $PREFIX/usr/include
+    find $PREFIX/usr/include \( -name .install -o -name ..install.cmd \) -delete
+    mkdir -p $PREFIX/usr/include/gnu
+    touch $PREFIX/usr/include/gnu/stubs.h
+    ;;
+
+    make)
+    rm -rf $TOP/buildoutput/$DIR/make
+    mkdir $TOP/buildoutput/$DIR/make
+    cd $TOP/buildoutput/$DIR/make
+    ../../../packages/make/configure --prefix=/usr
+    make
+    make DESTDIR=$PREFIX install
+    make distclean
+    ;;
+
+    m4)
+    rm -rf $TOP/buildoutput/$DIR/m4
+    mkdir $TOP/buildoutput/$DIR/m4
+    cd $TOP/buildoutput/$DIR/m4
+    ../../../packages/m4/configure --prefix=/usr
+    make
+    make DESTDIR=$PREFIX install
+    make distclean
+    ;;
+
+    newlib)
+    ;;
+
+    ncurses)
+    rm -rf $TOP/buildoutput/$DIR/ncurses
+    mkdir $TOP/buildoutput/$DIR/ncurses
+    cd $TOP/buildoutput/$DIR/ncurses
+    ../../../packages/ncurses/configure --prefix= \
+        --with-shared --enable-widec --without-tests \
+        --without-debug --without-manpages --with-termlib
+    make
+    make DESTDIR=$PREFIX install
+    make distclean
+
+    rm -rf $TOP/buildoutput/$DIR/ncurses
+    mkdir $TOP/buildoutput/$DIR/ncurses
+    cd $TOP/buildoutput/$DIR/ncurses
+    ../../../packages/ncurses/configure --prefix= \
+        --with-shared --without-debug --without-tests \
+        --without-manpages --with-termlib
+    make
+    make DESTDIR=$PREFIX install
+    make distclean
+    ;;
+
+    patch)
+    rm -rf $TOP/buildoutput/$DIR/patch
+    mkdir $TOP/buildoutput/$DIR/patch
+    cd $TOP/buildoutput/$DIR/patch
+    ../../../packages/patch/configure --prefix=
+    make
+    make DESTDIR=$PREFIX install
+    make distclean
+    ;;
+
+    perl)
+    cd $TOP/packages/perl
+    sh ./Configure -des -Dprefix=/usr -Dtargetarch=$TARGET -Dcc=$TARGET-gcc
+    make
+    make DESTDIR=$PREFIX install
+    make clean
+    ;;
+
+    pkg-config)
+    rm -rf $TOP/buildoutput/$DIR/pkg-config
+    mkdir $TOP/buildoutput/$DIR/pkg-config
+    cd $TOP/buildoutput/$DIR/pkg-config
+    ../../../packages/pkg-config/configure \
+        --prefix= --with-pic --with-internal-glib \
+        --disable-host-tool
+    make
+    make DESTDIR=$PREFIX install
+    make distclean
+    ;;
+
+    readline)
+    rm -rf $TOP/buildoutput/$DIR/readline
+    mkdir $TOP/buildoutput/$DIR/readline
+    cd $TOP/buildoutput/$DIR/readline
+    ../../../packages/readline/configure \
+        --prefix= --with-curses
+    make
+    make DESTDIR=$PREFIX install
+    make distclean
+    ;;
+
+    sed)
+    rm -rf $TOP/buildoutput/$DIR/sed
+    mkdir $TOP/buildoutput/$DIR/sed
+    cd $TOP/buildoutput/$DIR/sed
+    ../../../packages/sed/configure --prefix= \
+                --with-pic 
+    make
+    make DESTDIR=$PREFIX install
+    make distclean
+    ;;
+
+    tar)
+    rm -rf $TOP/buildoutput/$DIR/tar
+    mkdir $TOP/buildoutput/$DIR/tar
+    cd $TOP/buildoutput/$DIR/tar
+    ../../../packages/tar/configure --prefix=
+    make
+    make DESTDIR=$PREFIX install
+    make distclean
+    ;;
+
+    texinfo)
+    rm -rf $TOP/buildoutput/$DIR/texinfo
+    mkdir $TOP/buildoutput/$DIR/texinfo
+    cd $TOP/buildoutput/$DIR/texinfo
+    ../../../packages/texinfo/configure --prefix=/usr
+    make
+    make DESTDIR=$PREFIX install
+    make distclean
+    ;;
+
+    util-linux)
+    rm -rf $TOP/buildoutput/$DIR/util-linux
+    mkdir $TOP/buildoutput/$DIR/util-linux
+    cd $TOP/buildoutput/$DIR/util-linux
+    ../../../packages/util-linux/configure --enable-silent-rules \
+        --disable-makeinstall-setuid --disable-makeinstall-chown \
+        --prefix= --with-pic --disable-su --disable-sulogin \
+        --disable-login --disable-runuser --without-ncurses 
+    make
+    make DESTDIR=$PREFIX install
+    libtool_fixup $PREFIX/lib/libuuid.la
+    libtool_fixup $PREFIX/lib/libblkid.la
+    libtool_fixup $PREFIX/lib/libmount.la
+    make distclean
+    ;;
+
+    xz)
+    rm -rf $TOP/buildoutput/$DIR/xz
+    mkdir $TOP/buildoutput/$DIR/xz
+    cd $TOP/buildoutput/$DIR/xz
+    ../../../packages/xz/configure --prefix= --with-pic 
+    make
+    make DESTDIR=$PREFIX install
+    libtool_fixup $PREFIX/lib/liblzma.la
+    make distclean
+    ;;
+
+    *)
+    echo "Wrong $DIR pack"
+    exit 1
+    ;;
+    esac
+}
+
+#clean build env for a fresh build
+
+clean_dir
+
+if [ $BUILDTYPE != "x86_64" ]
+then
+set_build_env_x86_64_new
+fi
+
+#reuse build env for a partial build
+#set_build_env
+#$TOP/Config/envtest
+
+for pack in $pc_nos_linux_packages; do
+    build_pc_nos_linux_component $pack $INSTDIR
+done
+
+while IFS= read -r -d $'\0' file; do
+    echo "Changing $file"
+    sed -i -e 's@$PREFIX/lib@/$INSTDIR/lib@g' \
+     -e 's@$PREFIX/libexec@/$INSTDIR/libexec@g' \
+     -e 's@$PREFIX/usr/lib@/$INSTDIR/usr/lib@g' $file
+done < <(find $PREFIX -name *.la -print0)
+
+strip $PREFIX/bin/*
+strip $PREFIX/$TARGET/bin/*
+
+
